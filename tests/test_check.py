@@ -196,14 +196,32 @@ class TestExitCodes(unittest.TestCase):
     def test_notice_alone_is_zero(self):
         self.assertEqual(exit_code([self.result("notice")]), 0)
 
-    def test_unchecked_is_zero_unless_strict(self):
+    def test_unchecked_fails_by_default(self):
+        # This used to return 0 without --strict, and the documented CI workflow omitted
+        # --strict, so an offline run over a known-retracted DOI produced a green build. A
+        # citation the tool could not resolve is one it cannot vouch for, so the safe answer
+        # has to be the default rather than something a user has to know to ask for.
         results = [self.result("unchecked")]
-        self.assertEqual(exit_code(results), 0)
+        self.assertEqual(exit_code(results), 3)
         self.assertEqual(exit_code(results, strict=True), 3)
 
-    def test_strict_reports_tool_error_over_retraction(self):
+    def test_allow_unchecked_is_how_you_opt_out(self):
+        # For a reading list of books and blog posts with no DOI, which is a claim only the
+        # author can make.
+        results = [self.result("unchecked")]
+        self.assertEqual(exit_code(results, allow_unchecked=True), 0)
+
+    def test_a_confirmed_retraction_outranks_an_unchecked_citation(self):
+        # Both are nonzero so CI fails either way, and the difference is which fact the
+        # exit code reports. "You cite a retracted paper" is confirmed and actionable;
+        # "some lookups failed" would hide it behind an incomplete-run message.
         results = [self.result("unchecked"), self.result("retracted")]
-        self.assertEqual(exit_code(results, strict=True), 3)
+        self.assertEqual(exit_code(results), 1)
+        self.assertEqual(exit_code(results, strict=True), 1)
+
+    def test_allow_unchecked_never_hides_a_retraction(self):
+        results = [self.result("unchecked"), self.result("retracted")]
+        self.assertEqual(exit_code(results, allow_unchecked=True), 1)
 
 
 if __name__ == "__main__":

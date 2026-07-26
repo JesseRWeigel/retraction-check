@@ -42,13 +42,17 @@ implementation quietly returns "clean":
 3. **Crossref coverage is uneven.** A retraction can appear in `update-to`, in `updated-by`, in
    `relation`, or only as a `RETRACTED:` title prefix. All four are checked, because relying on
    any one of them misses real cases.
-4. **Retraction Watch adds cases Crossref lacks.** The database comes from Crossref as a public
-   dataset, 71,315 rows, refreshed with `--update-db`. The expression of concern above came from
+4. **Retraction Watch adds cases Crossref lacks.** The database comes from Crossref's GitLab
+   repository, 71,315 rows, refreshed with `--update-db`. The older Crossref Labs endpoint has
+   stopped updating; it is kept only as a fallback and using it prints a warning, because a
+   clean report against a frozen database means less than it looks like. The expression of concern above came from
    there rather than from the Crossref record.
 5. **An expression of concern is not a retraction.** It gets its own exit code, because
    conflating the two either cries wolf or hides a real problem.
-6. **A failed lookup is not a clean result.** `--strict` exits 3 when any citation could not be
-   checked, so an outage cannot read as a pass.
+6. **A failed lookup is not a clean result, and that is the default.** An unresolved citation,
+   or a failed Crossref or PubMed lookup, exits 3. `--allow-unchecked` opts out. This used to
+   require `--strict` and the shipped CI workflow omitted it, so an outage produced a green
+   build that could contain retracted citations. Found by independent review.
 
 ## Using it
 
@@ -58,7 +62,7 @@ retraction-check notes/*.md                        # markdown, DOIs and PMIDs ex
 retraction-check --doi 10.1016/S0140-6736(97)11096-0
 retraction-check --update-db                       # refresh the Retraction Watch CSV
 retraction-check notes/*.md --json                 # machine readable
-retraction-check notes/*.md --strict               # unresolvable citations fail too
+retraction-check notes/*.md --allow-unchecked       # accept items that have no DOI
 ```
 
 | Exit | Meaning |
@@ -66,7 +70,7 @@ retraction-check notes/*.md --strict               # unresolvable citations fail
 | 0 | Every citation resolved and none is retracted |
 | 1 | At least one cited paper is retracted |
 | 2 | Corrections or expressions of concern only, no retraction |
-| 3 | Tool error, or `--strict` and something could not be checked |
+| 3 | A citation could not be resolved, or a lookup failed. **This is the default**, not something `--strict` turns on |
 
 Set `RETRACTION_CHECK_MAILTO` to get Crossref's polite pool and better rate limits. Responses
 cache for 30 days by default, so a CI run costs almost nothing after the first.
@@ -77,7 +81,9 @@ cache for 30 days by default, so a CI run costs almost nothing after the first.
 - run: pip install -e . && retraction-check docs/**/*.md
 ```
 
-Exit 1 fails the job. Use `|| [ $? -eq 2 ]` if corrections should pass.
+Exit 1 fails the job on a retraction, exit 3 on anything it could not check. Use
+`|| [ $? -eq 2 ]` if corrections should pass. Do not add `--allow-unchecked` to silence a
+flaky network: it also silences an unresolvable citation.
 
 ## Status
 
@@ -85,8 +91,12 @@ Verified 2026-07-26.
 
 ```
 $ ./verify.sh
-1. parser unit checks
-  ok    DOI, PMID and arXiv extraction from markdown, bibtex and plain lists
+1. unit tests
+Ran 63 tests in 0.008s
+
+OK
+  ok    unit tests
+
 2. exit codes, replayed from fixtures/cache
   ok    retracted DOI list flags a retraction (exit 1)
   ok    clean DOI list passes (exit 0)
@@ -94,9 +104,18 @@ $ ./verify.sh
   ok    markdown reading list flags a retraction (exit 1)
   ok    bibtex bibliography flags a retraction (exit 1)
   ok    missing file is a tool error (exit 3)
+
 3. live Crossref lookup
   ok    live: Wakefield 1998 is flagged as retracted (exit 1)
   ok    live: Harris 2020 NumPy paper is clean (exit 0)
+
+4. the REAL Retraction Watch implementation, against a real CSV
+  ok    real RetractionWatchDB parses a real CSV and finds a real retraction
+  ok    negative control: a stubbed lookup does return nothing, so the check above is real
+
+5. an unresolvable citation fails by default
+  ok    offline lookup of a retracted DOI is not a pass (exit 3)
+  ok    --allow-unchecked accepts it deliberately (exit 0)
 
 PASS
 ```
@@ -109,11 +128,14 @@ a positive-only test.
 
 - **Coverage is only as good as Crossref and Retraction Watch.** A retraction announced solely
   in a journal's own PDF, with no Crossref record and no Retraction Watch entry, will not be seen.
-- **No preprint retraction tracking.** arXiv withdrawals and bioRxiv removals are not checked.
-  arXiv IDs are extracted and resolved where a DOI exists; a withdrawn preprint without one is
-  invisible here.
+- **arXiv and other preprint IDs are extracted but never resolved.** There is no DataCite
+  lookup and no DOI construction, so a bare `arXiv:1706.03762` comes back `[UNCHECKED]`, which
+  now fails the run rather than passing it. An earlier version of this README claimed these were
+  resolved where a DOI exists. They are not, and the claim was written from reading the code
+  rather than running it.
 - **A book, a webpage, or a citation with no persistent identifier cannot be checked.** Those
-  count as unresolvable rather than clean, and `--strict` makes that fail.
+  count as unresolvable rather than clean, which fails the run by default. Pass
+  `--allow-unchecked` when that is expected, understanding it also forgives outages.
 - Title-only citations are not resolved. Fuzzy title matching produces false positives, and a
   false retraction claim is worse than a miss.
 

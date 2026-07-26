@@ -23,7 +23,19 @@ from dataclasses import dataclass
 
 from .crossref import default_cache_dir, user_agent
 
-DOWNLOAD_URL = "https://api.labs.crossref.org/data/retractionwatch"
+# Crossref Labs has ended and its retractionwatch endpoint no longer updates, so cases newer
+# than the shutdown were silently absent from every download. Crossref now publishes the CSV
+# through GitLab. The Labs URL is kept as a last-resort fallback rather than deleted, because a
+# stale database with a loud warning beats no database at all, and the warning is what makes
+# that acceptable.
+# https://www.crossref.org/documentation/retrieve-metadata/retraction-watch/
+DOWNLOAD_URLS = [
+    ("gitlab", "https://gitlab.com/crossref/retraction-watch-data/-/raw/main/retraction_watch.csv"),
+    ("labs-deprecated", "https://api.labs.crossref.org/data/retractionwatch"),
+]
+
+# Kept so any existing caller or test referencing the old name still resolves.
+DOWNLOAD_URL = DOWNLOAD_URLS[0][1]
 
 NATURE_TO_KIND = {
     "retraction": "retraction",
@@ -51,25 +63,40 @@ def db_path(cache_dir: pathlib.Path | None = None) -> pathlib.Path:
     return base / "retractionwatch.csv"
 
 
-def download(dest: pathlib.Path, mailto: str, timeout: float = 300.0) -> int:
-    """Fetch the CSV to dest. Returns bytes written."""
-    url = f"{DOWNLOAD_URL}?{urllib.parse.quote(mailto)}"
-    req = urllib.request.Request(url, headers={"User-Agent": user_agent(mailto)})
+def download(dest: pathlib.Path, mailto: str, timeout: float = 300.0) -> tuple[int, str]:
+    """Fetch the CSV to dest. Returns (bytes written, which source it came from).
+
+    Sources are tried in order and the first that yields a plausibly complete file wins. The
+    deprecated Crossref Labs endpoint is last, and using it is reported to the caller rather
+    than hidden, because data from a feed that stopped updating will silently miss every case
+    newer than the shutdown.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".part")
-    written = 0
-    with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as fh:
-        while True:
-            chunk = resp.read(1 << 20)
-            if not chunk:
-                break
-            fh.write(chunk)
-            written += len(chunk)
-    if written < 1_000_000:
-        tmp.unlink(missing_ok=True)
-        raise OSError(f"download looks truncated ({written} bytes)")
-    tmp.replace(dest)
-    return written
+    failures = []
+    for name, base in DOWNLOAD_URLS:
+        url = f"{base}?{urllib.parse.quote(mailto)}" if "labs.crossref.org" in base else base
+        req = urllib.request.Request(url, headers={"User-Agent": user_agent(mailto)})
+        written = 0
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as fh:
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    written += len(chunk)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            tmp.unlink(missing_ok=True)
+            failures.append(f"{name}: {exc}")
+            continue
+        if written < 1_000_000:
+            tmp.unlink(missing_ok=True)
+            failures.append(f"{name}: download looks truncated ({written} bytes)")
+            continue
+        tmp.replace(dest)
+        return written, name
+    raise OSError("no Retraction Watch source worked: " + "; ".join(failures))
 
 
 class RetractionWatchDB:

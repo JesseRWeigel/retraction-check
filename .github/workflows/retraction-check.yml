@@ -33,5 +33,10 @@ jobs:
           # Crossref's polite pool. Any address you control works.
           RETRACTION_CHECK_MAILTO: ${{ secrets.CROSSREF_MAILTO }}
         run: |
+          # No --allow-unchecked on purpose. A citation the tool could not resolve, or a
+          # Crossref or PubMed outage, exits 3 and fails the job. An earlier version of this
+          # workflow let those pass, so an outage produced a green build that could contain
+          # retracted citations. Add --allow-unchecked only if your list genuinely includes
+          # books or posts with no DOI, and understand that it also forgives outages.
           retraction-check docs/**/*.md README.md
-          # exit 1 retraction, 2 concern or correction, 3 tool error
+          # exit 1 retraction, 2 concern or correction, 3 could not vouch for a citation

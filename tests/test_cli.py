@@ -87,9 +87,25 @@ class TestToolErrors(unittest.TestCase):
         finally:
             path.unlink()
 
-    def test_strict_turns_unresolvable_arxiv_into_a_tool_error(self):
+    def test_a_retraction_in_the_file_outranks_its_unresolvable_arxiv_id(self):
+        # sample.md contains both a retracted DOI and a bare arXiv id that cannot be
+        # resolved. Exit 1 is correct: the retraction is a confirmed fact, and reporting 3
+        # would bury it behind "some things could not be checked".
         code, _, _ = run(str(FIXTURES / "sample.md"), "--strict")
-        self.assertEqual(code, 3)
+        self.assertEqual(code, 1)
+
+    def test_an_unresolvable_citation_alone_is_a_tool_error(self):
+        # With nothing confirmed either way, an unresolvable citation is the whole result,
+        # and the tool must not report success.
+        path = FIXTURES / "only-arxiv.md"
+        path.write_text("See arXiv:1706.03762 for the architecture.\n", encoding="utf-8")
+        try:
+            code, _, _ = run(str(path), "--offline", "--no-cache", "--no-rw")
+            self.assertEqual(code, 3)
+            code, _, _ = run(str(path), "--offline", "--no-cache", "--no-rw", "--allow-unchecked")
+            self.assertEqual(code, 0)
+        finally:
+            path.unlink(missing_ok=True)
 
 
 class TestJSONOutput(unittest.TestCase):

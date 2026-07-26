@@ -49,6 +49,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--color", choices=("auto", "always", "never"), default="auto", help="colorize output"
     )
     p.add_argument(
+
+        "--allow-unchecked",
+
+        action="store_true",
+
+        help=(
+
+            "accept citations that could not be resolved, and lookup failures, "
+
+            "as passing. Off by default: a citation this tool cannot resolve is "
+
+            "one it cannot vouch for, so reporting success would let a Crossref "
+
+            "outage produce a green build containing retracted work. Use it for a "
+
+            "reading list of books and blog posts that genuinely have no DOI."
+
+        ),
+
+    )
+    p.add_argument(
         "--strict",
         action="store_true",
         help="exit 3 if any citation could not be checked at all",
@@ -141,11 +162,21 @@ def do_update_db(args) -> int:
     dest = pathlib.Path(args.rw_db) if args.rw_db else rwdb.db_path(cache)
     print(f"downloading Retraction Watch CSV to {dest} ...", file=sys.stderr)
     try:
-        size = rwdb.download(dest, mailto)
+        size, source = rwdb.download(dest, mailto)
     except Exception as exc:  # network, disk, truncation
         print(f"download failed: {exc}", file=sys.stderr)
         return EXIT_TOOL_ERROR
-    print(f"wrote {size / 1e6:.1f} MB", file=sys.stderr)
+    print(f"wrote {size / 1e6:.1f} MB from {source}", file=sys.stderr)
+    if source == "labs-deprecated":
+        # Silence here would be the bug. Crossref Labs stopped updating, so this file is
+        # missing every case newer than the shutdown and a clean report against it means less
+        # than it appears to.
+        print(
+            "WARNING: the current GitLab source was unreachable, so this came from the "
+            "deprecated Crossref Labs endpoint, which no longer updates. Cases newer than "
+            "its shutdown are absent. Re-run --update-db when GitLab is reachable.",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -185,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     pubmed_note = ""
+    pubmed_errors: list[str] = []
     bare_pmids = [c.pmid for c in citations if c.pmid and not c.doi]
     if bare_pmids and not args.no_pubmed:
         resolver = pubmed.PubMedResolver(
@@ -194,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             use_cache=not args.no_cache,
         )
         mapping = resolver.resolve(bare_pmids)
+        pubmed_errors = list(resolver.errors)
         for c in citations:
             if c.pmid and not c.doi and mapping.get(c.pmid):
                 c.doi = mapping[c.pmid]
@@ -235,9 +268,14 @@ def main(argv: list[str] | None = None) -> int:
             results, notes, show_clean=args.show_clean, color=args.color
         )
 
-    if client.errors and args.strict:
+    # Any lookup failure means the answer is unknown, and unknown is not clean. Crossref
+    # errors used to be the only fatal kind, so a PubMed outage left a bare PMID marked
+    # "checked" by a Retraction Watch query alone and the run reported success, missing a
+    # publisher-only Crossref retraction attached to that PMID.
+    lookup_failed = bool(client.errors) or bool(pubmed_errors)
+    if lookup_failed and not args.allow_unchecked:
         return EXIT_TOOL_ERROR
-    return exit_code(results, strict=args.strict)
+    return exit_code(results, strict=args.strict, allow_unchecked=args.allow_unchecked)
 
 
 if __name__ == "__main__":

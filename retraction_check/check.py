@@ -228,13 +228,29 @@ def check_all(citations: list[Citation], client, rw_db, progress=None) -> list[R
     return results
 
 
-def exit_code(results: list[Result], strict: bool = False) -> int:
-    """0 clean, 1 retraction found, 2 concern or correction only, 3 tool error."""
+def exit_code(
+    results: list[Result],
+    strict: bool = False,
+    allow_unchecked: bool = False,
+) -> int:
+    """0 clean, 1 retraction found, 2 concern or correction only, 3 cannot vouch.
+
+    An unchecked citation fails by DEFAULT. This tool exists to answer one question, "is
+    anything you cite retracted", and a citation it could not resolve is a citation it cannot
+    answer for. Returning 0 there means a Crossref outage produces a green build containing
+    retracted work, which is the single worst thing this tool could do, and it is exactly what
+    it used to do: the documented CI workflow omitted --strict, so the safe behaviour was
+    opt-in and nobody opted in.
+
+    `allow_unchecked` exists for the reading list full of books and blog posts that have no
+    DOI and never will. It has to be asked for, because "I know some of these are
+    unresolvable" is a claim only the author can make.
+    """
     statuses = {r.status for r in results}
-    if strict and "unchecked" in statuses:
-        return 3
     if "retracted" in statuses:
         return 1
+    if "unchecked" in statuses and not allow_unchecked:
+        return 3
     if statuses & {"concern", "correction"}:
         return 2
     return 0
