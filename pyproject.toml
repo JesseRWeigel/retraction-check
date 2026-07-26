@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retraction-check"
+version = "0.1.0"
+description = "Flag retracted papers, expressions of concern and corrections in a reading list"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["crossref", "retraction", "citations", "bibliography", "research-integrity"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/JesseRWeigel/retraction-check"
+
+[project.scripts]
+retraction-check = "retraction_check.cli:main"
+
+[tool.setuptools]
+packages = ["retraction_check"]

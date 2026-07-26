@@ -1,0 +1,37 @@
+# Example CI workflow. Copy this into the repository whose citations you want
+# guarded, and point the last step at your own files.
+name: retraction-check
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # Retractions happen after you cite a paper, so re-check on a schedule too.
+    - cron: "17 6 * * 1"
+
+jobs:
+  check-citations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install git+https://github.com/JesseRWeigel/retraction-check
+
+      - name: Cache Crossref lookups
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/retraction-check
+          key: retraction-check-${{ github.run_id }}
+          restore-keys: retraction-check-
+
+      - name: Check citations
+        env:
+          # Crossref's polite pool. Any address you control works.
+          RETRACTION_CHECK_MAILTO: ${{ secrets.CROSSREF_MAILTO }}
+        run: |
+          retraction-check docs/**/*.md README.md
+          # exit 1 retraction, 2 concern or correction, 3 tool error

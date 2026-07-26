@@ -1,0 +1,11 @@
+# Reading list containing papers that are known to have been retracted.
+# Used by verify.sh: this file must produce exit code 1.
+
+# Wakefield 1998, Lancet. Retracted 2010.
+10.1016/S0140-6736(97)11096-0
+
+# Mehra 2020, NEJM. Surgisphere data, retracted 2020.
+https://doi.org/10.1056/NEJMoa2007621
+
+# Clean control in the same file, so a blanket "flag everything" bug shows up.
+10.1038/s41586-020-2649-2
