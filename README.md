@@ -4,6 +4,8 @@ CLI that cross-references citations against Crossref retraction data
 
 Catalog task: `HLTH-003`. Part of [thousand](../../README.md).
 
+**[Read this on the web](https://jesserweigel.github.io/retraction-check/)**
+
 ## What this is
 
 TODO: replace with a real description of the deliverable.
