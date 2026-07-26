@@ -60,18 +60,75 @@ font-size:14px;color:var(--ink3)}
     <a class="btn primary" href="https://github.com/JesseRWeigel/retraction-check">Source on GitHub</a>
   </div>
 </header>
-<p>CLI that cross-references citations against Crossref retraction data</p>
-<p>Catalog task: <code>HLTH-003</code>. Part of <a href="../../README.md">thousand</a>.</p>
+<p>Point it at a reading list, a bibliography, or a directory of markdown notes. It resolves every citation, cross-references Crossref and the Retraction Watch database, and exits nonzero when something you cite has been retracted.</p>
 <p><strong><a href="https://jesserweigel.github.io/retraction-check/">Read this on the web</a></strong></p>
-<h2>What this is</h2>
-<p>TODO: replace with a real description of the deliverable.</p>
-<h2>Running it</h2>
-<pre><code>TODO</code></pre>
+<h2>It found a retraction on its first real run</h2>
+<p>Run against a working peptides knowledgebase, 28 markdown files, 31 resolvable citations:</p>
+<pre><code>[RETRACTED] 10.1124/jpet.114.218735
+    RETRACTED: The Procognitive and Synaptogenic Effects of Angiotensin IV-Derived Peptides
+    in: The Journal of Pharmacology and Experimental Therapeutics
+    DOI resolved from PMID 25187433 via PubMed
+    cited at: peptides/dihexa.md:42, peptides/dihexa.md:145, peptides/dihexa.md:161
+    - crossref-updated-by/publisher: Retraction 2014-11-1
+    - crossref-updated-by/retraction-watch: Expression of concern 2021-9-22
+    - retraction-watch-db: Expression of concern 9/22/2021 (Concerns/Issues about Image)
+
+31 citations checked: 1 retracted, 1 correction, 1 notice, 28 ok
+exit 1</code></pre>
+<p>Three citations in one file rested on a retracted study, and the retraction carries an expression of concern about image integrity. Nothing about reading that file would have told you. The citation was also a bare PubMed ID, so a DOI-only checker would have skipped it.</p>
+<h2>Why this is harder than it looks</h2>
+<p>Six things have to go right before a check is trustworthy, and each is a place a naive implementation quietly returns &quot;clean&quot;:</p>
+<ol><li><strong>Bare PubMed IDs.</strong> Notes cite PMIDs constantly. This resolves them to DOIs through NCBI</li></ol>
+<p>   E-utilities first, or 20 of the 23 PMIDs in the run above would not have been checked at all.</p>
+<ol><li><strong>A retraction notice is a separate DOI from the retracted paper.</strong> Both need flagging, with</li></ol>
+<p>   different labels, because citing the notice is fine and citing the paper is not.</p>
+<ol><li><strong>Crossref coverage is uneven.</strong> A retraction can appear in <code>update-to</code>, in <code>updated-by</code>, in</li></ol>
+<p>   <code>relation</code>, or only as a <code>RETRACTED:</code> title prefix. All four are checked, because relying on    any one of them misses real cases.</p>
+<ol><li><strong>Retraction Watch adds cases Crossref lacks.</strong> The database comes from Crossref as a public</li></ol>
+<p>   dataset, 71,315 rows, refreshed with <code>--update-db</code>. The expression of concern above came from    there rather than from the Crossref record.</p>
+<ol><li><strong>An expression of concern is not a retraction.</strong> It gets its own exit code, because</li></ol>
+<p>   conflating the two either cries wolf or hides a real problem.</p>
+<ol><li><strong>A failed lookup is not a clean result.</strong> <code>--strict</code> exits 3 when any citation could not be</li></ol>
+<p>   checked, so an outage cannot read as a pass.</p>
+<h2>Using it</h2>
+<pre><code>retraction-check refs.bib                          # a bibliography
+retraction-check notes/*.md                        # markdown, DOIs and PMIDs extracted
+retraction-check --doi 10.1016/S0140-6736(97)11096-0
+retraction-check --update-db                       # refresh the Retraction Watch CSV
+retraction-check notes/*.md --json                 # machine readable
+retraction-check notes/*.md --strict               # unresolvable citations fail too</code></pre>
+<table><thead><tr><th>Exit</th><th>Meaning</th></tr></thead><tbody><tr><td>0</td><td>Every citation resolved and none is retracted</td></tr><tr><td>1</td><td>At least one cited paper is retracted</td></tr><tr><td>2</td><td>Corrections or expressions of concern only, no retraction</td></tr><tr><td>3</td><td>Tool error, or <code>--strict</code> and something could not be checked</td></tr></tbody></table>
+<p>Set <code>RETRACTION_CHECK_MAILTO</code> to get Crossref&#x27;s polite pool and better rate limits. Responses cache for 30 days by default, so a CI run costs almost nothing after the first.</p>
+<h2>In CI</h2>
+<pre><code>- run: pip install -e . &amp;&amp; retraction-check docs/**/*.md</code></pre>
+<p>Exit 1 fails the job. Use <code>|| [ $? -eq 2 ]</code> if corrections should pass.</p>
 <h2>Status</h2>
-<p><strong>NOT YET VERIFIED.</strong> No verify command has been run against this project.</p>
-<p>A maintainer or agent must replace this section with the pasted output of the verify command. Per <code>AGENTS.md</code>, a project is not done until that output appears here and <code>tools/logrun.py</code> has recorded exit code 0.</p>
-<h2>Unfinished</h2>
-<ul><li>Everything.</li></ul>
+<p>Verified 2026-07-26.</p>
+<pre><code>$ ./verify.sh
+1. parser unit checks
+  ok    DOI, PMID and arXiv extraction from markdown, bibtex and plain lists
+2. exit codes, replayed from fixtures/cache
+  ok    retracted DOI list flags a retraction (exit 1)
+  ok    clean DOI list passes (exit 0)
+  ok    expression of concern only (exit 2)
+  ok    markdown reading list flags a retraction (exit 1)
+  ok    bibtex bibliography flags a retraction (exit 1)
+  ok    missing file is a tool error (exit 3)
+3. live Crossref lookup
+  ok    live: Wakefield 1998 is flagged as retracted (exit 1)
+  ok    live: Harris 2020 NumPy paper is clean (exit 0)
+
+PASS</code></pre>
+<p>The live checks use Wakefield 1998, the retracted MMR paper, as a known positive and the NumPy paper as a known negative. Both directions matter: a checker that flagged everything would pass a positive-only test.</p>
+<h2>Limitations</h2>
+<ul><li><strong>Coverage is only as good as Crossref and Retraction Watch.</strong> A retraction announced solely</li></ul>
+<p>  in a journal&#x27;s own PDF, with no Crossref record and no Retraction Watch entry, will not be seen.</p>
+<ul><li><strong>No preprint retraction tracking.</strong> arXiv withdrawals and bioRxiv removals are not checked.</li></ul>
+<p>  arXiv IDs are extracted and resolved where a DOI exists; a withdrawn preprint without one is   invisible here.</p>
+<ul><li><strong>A book, a webpage, or a citation with no persistent identifier cannot be checked.</strong> Those</li></ul>
+<p>  count as unresolvable rather than clean, and <code>--strict</code> makes that fail.</p>
+<ul><li>Title-only citations are not resolved. Fuzzy title matching produces false positives, and a</li></ul>
+<p>  false retraction claim is worse than a miss.</p>
 <footer>
   <p>Part of <a href="https://github.com/JesseRWeigel/722-things-to-build">722 things to
   build</a>, a catalog of scoped projects. Built and verified by an agent fleet; every
